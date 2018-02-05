@@ -67,7 +67,6 @@ def train(model, cv_data, intMat, drugMat, targetMat):
             auc.append(auc_val)
     return np.array(aupr, dtype=np.float64), np.array(auc, dtype=np.float64)
 
-
 def svd_init(M, num_factors):
     from scipy.linalg import svd
     U, s, V = svd(M, full_matrices=False)

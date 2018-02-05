@@ -66,6 +66,7 @@ def main(argv):
     intMat, drugMat, targetMat = load_data_from_file(dataset, os.path.join(data_dir, 'datasets'))
     drug_names, target_names = get_drugs_targets_names(dataset, os.path.join(data_dir, 'datasets'))
 
+
     if predict_num == 0:
         if cvs == 1:  # CV setting CVS1
             X, D, T, cv = intMat, drugMat, targetMat, 1

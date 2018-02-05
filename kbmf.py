@@ -19,12 +19,12 @@ class KBMF:
         R = W*intMat
         drugMat = (drugMat+drugMat.T)/2
         targetMat = (targetMat+targetMat.T)/2
-        mlab = Matlab()
+        mlab = Matlab('/Applications/MATLAB_R2014b.app/bin/matlab')
         mlab.start()
         # print os.getcwd()
         # self.predictR = mlab.run_func(os.sep.join([os.getcwd(), "kbmf2k", "kbmf.m"]), {'Kx': drugMat, 'Kz': targetMat, 'Y': R, 'R': self.num_factors})['result']
-        self.predictR = mlab.run_func(os.path.realpath(os.sep.join(['../kbmf2k', "kbmf.m"])), {'Kx': drugMat, 'Kz': targetMat, 'Y': R, 'R': self.num_factors})['result']
-        # print os.path.realpath(os.sep.join(['../kbmf2k', "kbmf.m"]))
+        self.predictR = mlab.run_func(os.path.realpath(os.sep.join(['./kbmf2k', "kbmf.m"])), {'Kx': drugMat, 'Kz': targetMat, 'Y': R, 'R': self.num_factors})['result']
+        # print os.path.realpath(os.sep.join(['./kbmf2k', "kbmf.m"]))
         mlab.stop()
 
     def predict_scores(self, test_data, N):
