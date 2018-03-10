@@ -51,6 +51,8 @@ def cross_validation(intMat, seeds, cv=0, num=10):
                 test_data = np.array([[k/num_targets, k % num_targets] for k in ii], dtype=np.int32)
             x, y = test_data[:, 0], test_data[:, 1]
             test_label = intMat[x, y]
+            # W is not the train data,but the index of train data.
+            # an entry in intmat is used to train only the responding entry in W is 1
             W = np.ones(intMat.shape)
             W[x, y] = 0
             cv_data[seed].append((W, test_data, test_label))

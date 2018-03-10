@@ -8,7 +8,7 @@ from sklearn.metrics import auc
 
 class NRLMF:
 
-    def __init__(self, cfix=5, K1=5, K2=5, num_factors=10, theta=1.0, lambda_d=0.625, lambda_t=0.625, alpha=0.1, beta=0.1, max_iter=100):
+    def __init__(self, cfix=5, K1=5, K2=5, num_factors=10, theta=0.02, lambda_d=0.625, lambda_t=0.625, alpha=0.1, beta=0.1, max_iter=100):
         self.cfix = int(cfix)  # importance level for positive observations
         self.K1 = int(K1)
         self.K2 = int(K2)
@@ -19,6 +19,33 @@ class NRLMF:
         self.alpha = float(alpha)
         self.beta = float(beta)
         self.max_iter = int(max_iter)
+
+    # def AGD_optimization(self, seed=None):
+    #     if seed is None:
+    #         self.U = np.sqrt(1/float(self.num_factors))*np.random.normal(size=(self.num_drugs, self.num_factors))
+    #         self.V = np.sqrt(1/float(self.num_factors))*np.random.normal(size=(self.num_targets, self.num_factors))
+    #     else:
+    #         prng = np.random.RandomState(seed)
+    #         self.U = np.sqrt(1/float(self.num_factors))*prng.normal(size=(self.num_drugs, self.num_factors))
+    #         self.V = np.sqrt(1/float(self.num_factors))*prng.normal(size=(self.num_targets, self.num_factors))
+    #     dg_sum = np.zeros((self.num_drugs, self.U.shape[1]))
+    #     tg_sum = np.zeros((self.num_targets, self.V.shape[1]))
+    #     last_log = self.log_likelihood()
+    #     for t in range(self.max_iter):
+    #         dg = self.deriv(True)
+    #         dg_sum += np.square(dg)
+    #         vec_step_size = self.theta / np.sqrt(dg_sum)
+    #         self.U += vec_step_size * dg
+    #         tg = self.deriv(False)
+    #         tg_sum += np.square(tg)
+    #         vec_step_size = self.theta / np.sqrt(tg_sum)
+    #         self.V += vec_step_size * tg
+    #         curr_log = self.log_likelihood()
+    #         delta_log = (curr_log-last_log)/abs(last_log)
+    #         if abs(delta_log) < 1e-5:
+    #             break
+    #         last_log = curr_log
+
 
     def AGD_optimization(self, seed=None):
         if seed is None:
@@ -35,16 +62,19 @@ class NRLMF:
             dg = self.deriv(True)
             dg_sum += np.square(dg)
             vec_step_size = self.theta / np.sqrt(dg_sum)
+            # vec_step_size = self.theta
             self.U += vec_step_size * dg
             tg = self.deriv(False)
             tg_sum += np.square(tg)
             vec_step_size = self.theta / np.sqrt(tg_sum)
+            # vec_step_size = self.theta
             self.V += vec_step_size * tg
             curr_log = self.log_likelihood()
             delta_log = (curr_log-last_log)/abs(last_log)
             if abs(delta_log) < 1e-5:
                 break
             last_log = curr_log
+
 
     def deriv(self, drug):
         if drug:

@@ -410,3 +410,4 @@ if __name__=="__main__":
         print "auc:%.6f, aupr: %.6f, auc_conf:%.6f, aupr_conf:%.6f, Time:%.6f" % (auc_avg, aupr_avg, auc_conf, aupr_conf, time.clock() - tic)
         if debug:
             break
+        # test

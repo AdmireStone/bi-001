@@ -125,4 +125,5 @@ def main(argv):
             novel_prediction_analysis(predict_pairs, new_dti_file, os.path.join(data_dir, 'biodb'))
 
 if __name__ == "__main__":
+    sys.argv.append('--cvs=2')
     main(sys.argv[1:])

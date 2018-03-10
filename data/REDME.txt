@@ -1,0 +1,6 @@
+来源：http://web.kuicr.kyoto-u.ac.jp/supp/yoshi/drugtarget/
+
+路径前缀:/Users/dong/Desktop/bi/datasets/
+_admat_dgc.txt  # Adjacency matrix of the gold standard drug-target interaction data
+_simmat_dc.txt  # Compound structure similarity matrix（the drug similarity file） 化合物是药品
+_simmat_dg.txt  # Protein sequence similarity matrix (the target similarity file) 蛋白质是目标
