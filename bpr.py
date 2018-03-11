@@ -1,3 +1,4 @@
+#coding: utf8
 '''
 Steffen Rendle "BPR: Bayesian Personalized Ranking From implicit Feedback" 2009
 '''
@@ -166,7 +167,7 @@ class BPR(object):
                         # update [U]_u:
                         self.sum_derive_U[u, :] += error*(self.V[i, :] - self.V[j, :])
                         self.sum_derive_V[i, :] += error*(self.U[u, :])
-                        self.sum_derive_V[j, :] += error(-self.U[u, :])
+                        self.sum_derive_V[j, :] += error*(-self.U[u, :])
 
                 if self.isbatch:
                     P = self.nb_reg(isDrug=True)
@@ -206,7 +207,6 @@ class BPR(object):
             if loss_type==1:
                 # return vecotor_to_update + self.eta * (error * deta - reg_vector)
                 return vecotor_to_update + self.eta * (error * deta - reg_vector)
-
 
         def remove_overflow(val):
                 if val > 100:
@@ -399,9 +399,12 @@ if __name__=="__main__":
     #0: do not use neighbor regularization
     neighbor = 1
 
-    print "params: sampling_type={0}, max_iter={1}, loss_type={2}, neighbor={3}, CVS={4}".format(sampling_type,max_iter,
+    # optimization: 0, SGD; 1, BGD
+    optm = 1
+
+    print "params: sampling_type={0}, max_iter={1}, loss_type={2}, neighbor={3}, CVS={4},optimization={5}".format(sampling_type,max_iter,
                                                                                                  loss_type,neighbor,
-                                                                                                 cvs)
+                                                                                                 cvs,optm)
     seeds = [7771, 8367, 22, 1812, 4659]
     for dataset in ["nr", "gpcr", "ic", "e"]:
         print "**********training dataset:{0}*************".format(dataset)
@@ -425,7 +428,7 @@ if __name__=="__main__":
                 # print "Fold:{0}".format(fold_count)
                 fold_count=fold_count+1
                 model=BPR(max_iter=100, K=latent_k, loss_type=loss_type, neighbor_reg=neighbor)
-                model.fix_model(W,X,D,T,seed,sampling_type=sampling_type)
+                model.fix_model(W,X,D,T,seed,sampling_type=sampling_type,batch=optm)
                 aupr_val, auc_val = model.evaluation(test_data, test_label)
                 aupr.append(aupr_val)
                 auc_list.append(auc_val)
