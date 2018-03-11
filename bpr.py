@@ -127,8 +127,9 @@ class BPR(object):
             assert data[v,j] == 0
             yield u,i,v,j
 
-    def fix_model(self,W,intMat,drugMat,targetMat,seed,isverbose=False,sampling_type=0,debug=0):
+    def fix_model(self,W,intMat,drugMat,targetMat,seed,isverbose=False,sampling_type=0,debug=0,batch=0):
         self.num_drugs, self.num_targets = intMat.shape
+        self.isbatch = batch
         # x and y are the indices of train data
         x, y = np.where(W > 0)
         self.train_drugs = set(x.tolist())
@@ -145,17 +146,39 @@ class BPR(object):
         self.train_drugs, self.train_targets = set(x_1.tolist()), set(y_1.tolist())
         self.construct_neighborhood(drugMat, targetMat)
         loss=[]
+
+        if self.isbatch:
+            self.sum_derive_U = np.zeros(self.U.shape)
+            self.sum_derive_V = np.zeros(self.V.shape)
+
         for t in xrange(self.max_iter):
             if isverbose:
                 print 'starting iteration {0}'.format(t)
+
             if sampling_type==0:
                 for u,i,j in self.draw_train_sample(x,y,intMat):
-                    if isverbose:
-                        print "samples:{0}".format(debug)
-                    error=self.update_factors(self.loss_type,self.neighbor_reg,u, i, j)
-                    loss.append(error)
-                    if isverbose:
-                        debug=debug+1
+                    # 如是批梯度，则只返回error和正则项，不更新
+                    # 若是SGD， 则机返回 error和正则项， 也进行更新
+                    error = self.update_factors(self.loss_type, self.neighbor_reg, u, i, j)
+                    if not self.isbatch:
+                        loss.append(error)
+                    else:
+                        # update [U]_u:
+                        self.sum_derive_U[u, :] += error*(self.V[i, :] - self.V[j, :])
+                        self.sum_derive_V[i, :] += error*(self.U[u, :])
+                        self.sum_derive_V[j, :] += error(-self.U[u, :])
+
+                if self.isbatch:
+                    P = self.nb_reg(isDrug=True)
+                    Q = self.nb_reg(isDrug=False)
+
+                    if loss_type == 0:
+                        self.U += self.eta * (error * self.sum_derive_U + P)
+                        self.V += self.eta * (error * self.sum_derive_V + Q)
+                    if loss_type == 1:
+                        self.U += self.eta * (error * self.sum_derive_U - P)
+                        self.V += self.eta * (error * self.sum_derive_V - Q)
+
             elif sampling_type==1:
                 for u, i, v, j in self.draw_train_sample_special(x,y,intMat):
                     if debug:
@@ -178,9 +201,12 @@ class BPR(object):
     def update_factors(self,*train_sample):
         def update(error, vecotor_to_update, regular, deta, reg_vector, loss_type=0,):
             if loss_type==0:
-                return vecotor_to_update + self.eta * (error * deta + regular * reg_vector)
+                # return vecotor_to_update + self.eta * (error * deta + regular * reg_vector)
+                return vecotor_to_update + self.eta * (error * deta + reg_vector)
             if loss_type==1:
-                return vecotor_to_update + self.eta * (error * deta - regular * reg_vector)
+                # return vecotor_to_update + self.eta * (error * deta - reg_vector)
+                return vecotor_to_update + self.eta * (error * deta - reg_vector)
+
 
         def remove_overflow(val):
                 if val > 100:
@@ -189,49 +215,53 @@ class BPR(object):
                     val = -100
                 return val
 
-        P = self.nb_reg(isDrug=True)
-        Q = self.nb_reg(isDrug=False)
-
         def get_reg(idx,matx,isDrug):
             if self.neighbor_reg == 0:
                 if isDrug:
-                    reg_vector = self.U[idx, :]
+                    reg_vector = self.lambda_d*self.U[idx, :]
                 else:
-                    reg_vector = self.V[idx, :]
+                    reg_vector = self.lambda_t*self.V[idx, :]
             else:
                 reg_vector = matx[idx, :]
             return  reg_vector
 
+        P = self.nb_reg(isDrug=True)
+        Q = self.nb_reg(isDrug=False)
 
         num_params = len(train_sample)
         # print num_params
         if num_params == 5:
             loss_type, neighbor_reg, u, i, j = train_sample
             x_uij = np.dot(self.U[u, :], self.V[i, :].T) - np.dot(self.U[u, :], self.V[j, :].T)
+            # avoid overflow
+
             x_uij = remove_overflow(x_uij)
             # logistic function
             if loss_type==0:
-                # avoid overflow
                 error = (1. / (1 + np.exp(x_uij)))
             # square loss
             if loss_type==1:
                 error = 1-x_uij
 
+            reg_vector_u = get_reg(u, P, isDrug=True)
+            reg_vector_i = get_reg(i, Q, isDrug=False)
+            reg_vector_j = get_reg(j, Q, isDrug=False)
+
+            if self.isbatch:
+                return error
+
             # update [U]_u:
             deta = self.V[i, :] - self.V[j, :]
-            reg_vector = get_reg(u,P,isDrug=True)
             # self.U[u, :] = update(error, self.U[u, :], self.lambda_u, deta, reg_vector, loss_type=loss_type)
-            temp_U_u = update(error, self.U[u, :], self.lambda_u, deta, reg_vector, loss_type=loss_type)
+            temp_U_u = update(error, self.U[u, :], self.lambda_u, deta, reg_vector_u, loss_type=loss_type)
             # update [I]_if
             deta = self.U[u, :]
-            reg_vector = get_reg(i, Q, isDrug=False)
             # self.V[i, :] = update(error, self.V[i, :], self.lambda_i, deta, reg_vector, loss_type=loss_type)
-            temp_V_i= update(error, self.V[i, :], self.lambda_i, deta, reg_vector, loss_type=loss_type)
+            temp_V_i= update(error, self.V[i, :], self.lambda_i, deta, reg_vector_i, loss_type=loss_type)
             # update [I]_jf
             deta = -self.U[u, :]
-            reg_vector = get_reg(j, Q, isDrug=False)
             # self.V[j, :] = update(error, self.V[j, :], self.lambda_j, deta, reg_vector, loss_type=loss_type)
-            temp_V_j = update(error, self.V[j, :], self.lambda_j, deta, reg_vector, loss_type=loss_type)
+            temp_V_j = update(error, self.V[j, :], self.lambda_j, deta, reg_vector_j, loss_type=loss_type)
 
             # update
             self.U[u, :] = temp_U_u
@@ -343,8 +373,6 @@ class BPR(object):
             X[i, ii] = S[i, ii]
         return X
 
-
-
 def train(model, cv_data, intMat, drugMat, targetMat):
     aupr, auc = [], []
     for seed in cv_data.keys():
@@ -366,8 +394,8 @@ if __name__=="__main__":
     cvs=3
     #0: classical sample, uij; 1: ui,vj
     sampling_type=0
-    #0: logistic loss; 1: square loss
-    loss_type = 1
+    # 0: logistic loss;   1: square loss
+    loss_type = 0
     #0: do not use neighbor regularization
     neighbor = 1
 
