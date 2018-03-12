@@ -7,7 +7,9 @@ import numpy as np
 import random
 class LLORLMA(object):
 
-    def __init__(self, k, sim_h, cfix, num_factors, lambda_d, lambda_t, theta, max_iter):
+    def __init__(self, k, sim_h, cfix = 5, K1 = 5, K2 = 5,
+                 num_factors = 10, theta = 0.02, lambda_d = 0.01, lambda_t = 0.01,
+                 alpha = 0.1, beta = 0.1, max_iter=100):
         '''
         :param drug_sm:
         :param target_sm:
@@ -15,10 +17,14 @@ class LLORLMA(object):
         self.k = k   # the num of anchor points
         self.h = float(sim_h) # the threshold of the neighbors range
         self.cfix = int(cfix)  # importance level for positive observations
+        self.K1 = int(K1)
+        self.K2 = int(K2)
         self.num_factors = int(num_factors)
         self.theta = float(theta)
         self.lambda_d = float(lambda_d)
         self.lambda_t = float(lambda_t)
+        self.alpha = float(alpha)
+        self.beta = float(beta)
         self.max_iter = int(max_iter)
 
 
@@ -41,11 +47,8 @@ class LLORLMA(object):
         random.shuffle(idx)
         train_x = x[idx]
         train_y = y[idx]
-        train_drug = set(train_x.tolist())
-        train_target = set(train_y.tolist())
         self.anchor_points_x = train_x[:self.k]
         self.anchor_points_y = train_y[:self.k]
-
         self.ones = np.ones((self.num_drugs, self.num_targets))
         self.intMat = self.cfix*intMat*W
         # 这里有问题，因为参加训练drug和targets
@@ -53,22 +56,13 @@ class LLORLMA(object):
         # 也就是说 set(temp_x.tolist()) == set(x)
         temp_x, temp_y = np.where(self.intMat > 0)
         self.train_drugs, self.train_targets = set(temp_x.tolist()), set(temp_y.tolist())
-
         self.intMat1 = (self.cfix-1)*intMat*W + self.ones
-
+        self.construct_neighborhood(drugMat, targetMat)
         # todo paralle
         for a_t, b_t in zip(self.anchor_points_x, self.anchor_points_y):
             # for each anchor points, calculate the neighbor drugs of a_t, and the neighbor items of b_t
-
-            N_a = drugMat[a_t, :] * (drugMat[a_t,:] > self.h)
-            N_b = targetMat[b_t, :] * (targetMat[b_t,:] > self.h)
-
-            # Solve the local matrix approximation with K^(a_t)_h1,K^(b_t)_h2
-            self.nbMat = np.dot(N_a.reshape(-1,1), N_b.reshape(1,-1))
-            if np.max(self.nbMat) == 0:
-                print "Error！！！！"
-                continue
-            assert self.nbMat.shape == (self.num_drugs, self.num_targets)
+            self.N_a = drugMat[a_t, :] * (drugMat[a_t,:] > self.h)
+            self.N_b = targetMat[b_t, :] * (targetMat[b_t,:] > self.h)
             U_t, V_t = self.ALGD_optimization(seed)
             self.local_models.append(np.dot(U_t, V_t.T))
 
@@ -85,10 +79,12 @@ class LLORLMA(object):
         last_log = self.log_likelihood()
         for t in range(self.max_iter):
             dg = self.deriv(True)
+            # dg = self.N_a.reshape(self.num_drugs,-1)*dg
             dg_sum += np.square(dg)
             vec_step_size = self.theta / np.sqrt(dg_sum)
             self.U += vec_step_size * dg
             tg = self.deriv(False)
+            # tg = self.N_b.reshape(self.num_targets,-1)*tg
             tg_sum += np.square(tg)
             vec_step_size = self.theta / np.sqrt(tg_sum)
             self.V += vec_step_size * tg
@@ -133,18 +129,15 @@ class LLORLMA(object):
         else:
             vec_deriv = np.dot(self.intMat.T, self.U)
         A = np.dot(self.U, self.V.T)
-        A = A * self.nbMat
-        A = self.remove_overflow(A)
         A = np.exp(A)
         A /= (A + self.ones)
         A = self.intMat1 * A
         if drug:
             vec_deriv -= np.dot(A, self.V)
-            vec_deriv = vec_deriv
-            vec_deriv -= self.lambda_d*self.U
+            vec_deriv -= self.lambda_d*self.U+self.alpha*np.dot(self.DL, self.U)
         else:
             vec_deriv -= np.dot(A.T, self.U)
-            vec_deriv -= self.lambda_t*self.V
+            vec_deriv -= self.lambda_t*self.V+self.beta*np.dot(self.TL, self.V)
         return vec_deriv
 
     def get_capped_model(self, d, t, drugMat, targetMat):
@@ -162,33 +155,88 @@ class LLORLMA(object):
                 double_capped_model += (nbMat[x,y]) * local_model
         return double_capped_model
 
+    def log_likelihood(self):
+        loglik = 0
+        A = np.dot(self.U, self.V.T)
+        B = A * self.intMat
+        loglik += np.sum(B)
+        A = np.exp(A)
+        A += self.ones
+        A = np.log(A)
+        A = self.intMat1 * A
+        loglik -= np.sum(A)
+        loglik -= 0.5 * self.lambda_d * np.sum(np.square(self.U))+0.5 * self.lambda_t * np.sum(np.square(self.V))
+        loglik -= 0.5 * self.alpha * np.sum(np.diag((np.dot(self.U.T, self.DL)).dot(self.U)))
+        loglik -= 0.5 * self.beta * np.sum(np.diag((np.dot(self.V.T, self.TL)).dot(self.V)))
+        return loglik
+
+    def construct_neighborhood(self, drugMat, targetMat):
+        self.dsMat = drugMat - np.diag(np.diag(drugMat))
+        self.tsMat = targetMat - np.diag(np.diag(targetMat))
+        if self.K1 > 0:
+            S1 = self.get_nearest_neighbors(self.dsMat, self.K1)
+            self.DL = self.laplacian_matrix(S1)
+            S2 = self.get_nearest_neighbors(self.tsMat, self.K1)
+            self.TL = self.laplacian_matrix(S2)
+        else:
+            self.DL = self.laplacian_matrix(self.dsMat)
+            self.TL = self.laplacian_matrix(self.tsMat)
+
+    def laplacian_matrix(self, S):
+        x = np.sum(S, axis=0)
+        y = np.sum(S, axis=1)
+        L = 0.5*(np.diag(x+y) - (S+S.T))  # neighborhood regularization matrix
+        return L
+
+    def get_nearest_neighbors(self, S, size=5):
+        m, n = S.shape
+        X = np.zeros((m, n))
+        for i in xrange(m):
+            ii = np.argsort(S[i, :])[::-1][:min(size, n)]
+            X[i, ii] = S[i, ii]
+        return X
+
+    def get_local_models_weight_dstb(self, d, t, drugMat, targetMat):
+        '''
+        获取local model的权重分布.
+        (d,t)与各个锚点的相似度加权平均.
+        注意: 这里暂时没有使用 self.h 来筛选
+        :param d:
+        :param t:
+        :return:
+        '''
+        weights = []
+        for a_t, b_t in zip(self.anchor_points_x, self.anchor_points_y):
+            s_drug = drugMat[a_t, d]
+            s_target = targetMat[b_t, t]
+            weights.append(s_drug*s_target)
+
+        weights /= np.sum(weights)
+        return np.array(weights)
+
+    def get_local_models_score(self,d, t):
+        local_models_score = []
+        for local_model in self.local_models:
+            val = local_model[d, t]
+            local_models_score.append(1./ (1 + np.exp(-val)))
+        return np.array(local_models_score)
+
+
     def evaluation(self, test_data, test_label, drugMat, targetMat):
         from sklearn.metrics import precision_recall_curve, roc_curve
         from sklearn.metrics import auc
         scores = []
-        temp_labels=[]
-        idx = 0
+        # temp_labels=[]
+        # idx = 0
         for d, t in test_data:
-            capped_model = self.get_capped_model(d,t,drugMat,targetMat)
-            val = capped_model[d,t]
-            scores.append(np.exp(val) / (1 + np.exp(val)))
-            # if d in self.train_drugs:
-            #     if t in self.train_targets: # d 和 t都在训练样本中
-            #         capped_model = self.get_capped_model(d,t,drugMat,targetMat)
-            #         val = capped_model[d,t]
-            #         scores.append(np.exp(val) / (1 + np.exp(val)))
-            #     else: # target 不在训练样本中
-            #         # to do 利用锚点，重构出
-            #         pass
-            # else:
-            #     if t in self.train_targets: # drug 不在训练样本中
-            #         pass
-            #     else:   # drug 和 taget 都不在训练样本中
-            #         pass
+            # 1. 获得每个local model的权重
+            # 2. 获取各个local model 的g概率预测
+            # 2. 加权组合，求平均
+            weights = self.get_local_models_weight_dstb(d,t,drugMat,targetMat)
+            scores_models = self.get_local_models_score(d, t)
+            score = (np.dot(weights.reshape(1,-1),scores_models.reshape(-1, 1))).ravel()[0]
+            scores.append(score)
 
-                    # temp_labels.append(test_label[idx])
-            # idx += 1
-            # val = np.sum(self.U[d, :]
         prec, rec, thr = precision_recall_curve(test_label, np.array(scores))
         aupr_val = auc(rec, prec)
         fpr, tpr, thr = roc_curve(test_label, np.array(scores))
